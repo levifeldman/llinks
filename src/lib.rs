@@ -1,16 +1,33 @@
-// no-std
+#![no_std] // portant!
 
 use core::fmt::Debug;
 use core::mem::MaybeUninit;
 
+mod iterators;
+pub use iterators::*;
+
+
+
+#[cfg(test)] extern crate std;
+#[cfg(test)] use std::*;
+
+
+
 #[derive(Debug)]
-pub struct MainStructure<T: Debug, const N: usize> {
+struct Node<T: Debug> {
+    element: Option<T>,  // will be None if this node is free //  // not needed for this to be an option but i like it. it can also be default and then we can save the cost of overwriting the bytes but idk.
+    prev: Option<usize>, // none if this is the first item
+    next: Option<usize>, // none if this is the last item
+}
+
+#[derive(Debug)]
+pub struct StackStructure<T: Debug, const N: usize> {
     main_memory: [Node<T>; N],
     head_and_tail: Option<(usize, usize)>,      // None if list is empty// index into the main_memory
     free_list: Option<usize>,                   // points to the first free node. None if list is full.
     len: usize,
 }
-impl<T: Debug, const N: usize> MainStructure<T, N> {
+impl<T: Debug, const N: usize> StackStructure<T, N> {
     pub fn new() -> Self {
         Self {
             main_memory: {
@@ -58,7 +75,7 @@ impl<T: Debug, const N: usize> MainStructure<T, N> {
                         self.main_memory[new_node_i].prev = None; // i think it will always be already None since we using first free index.
                         self.main_memory[new_node_i].next = None;
                     }
-                    Some((head, tail)) => {
+                    Some((head, _tail)) => {
                         
                         if insertion_index == 0 {
                             self.main_memory[new_node_i].next = Some(head);
@@ -105,7 +122,7 @@ impl<T: Debug, const N: usize> MainStructure<T, N> {
     pub fn delete(&mut self, deletion_index: usize) -> Result<T, ()> { // error if index out of bounds 
         match self.head_and_tail {
             None => return Err(()), // nothing to delete
-            Some((head, tail)) => {
+            Some((head, _tail)) => {
                 let mut node_to_delete_i = head;
                 for _ in 0..deletion_index {
                     node_to_delete_i = match self.main_memory[node_to_delete_i].next {
@@ -158,7 +175,7 @@ impl<T: Debug, const N: usize> MainStructure<T, N> {
     pub fn get(&self, get_index: usize) -> Result<&T, ()> { // error if index out of bounds
         match self.head_and_tail {
             None => return Err(()), // nothing to get
-            Some((head, tail)) => {
+            Some((head, _tail)) => { // i can optimize this by starting from the tail if get_index > (len/2)
                 let mut node_to_get_i = head;
                 for _ in 0..get_index {
                     node_to_get_i = match self.main_memory[node_to_get_i].next {
@@ -174,7 +191,7 @@ impl<T: Debug, const N: usize> MainStructure<T, N> {
     pub fn get_mut(&mut self, get_index: usize) -> Result<&mut T, ()> { // err if index out of bounds
         match self.head_and_tail {
             None => return Err(()), // nothing to get
-            Some((head, tail)) => {
+            Some((head, _tail)) => { // i can optimize this by starting from the tail if get_index > (len/2)
                 let mut node_to_get_i = head;
                 for _ in 0..get_index {
                     node_to_get_i = match self.main_memory[node_to_get_i].next {
@@ -195,130 +212,138 @@ impl<T: Debug, const N: usize> MainStructure<T, N> {
         N
     }
     
-    pub fn iter<'a>(&'a self) -> MainStructureIteratorRef<'a, T, N> {
-        MainStructureIteratorRef{
+    pub fn iter<'a>(&'a self) -> StackStructureIteratorRef<'a, T, N> {
+        StackStructureIteratorRef{
             ms: self,
-            current_node_i: self.head_and_tail.map(|(head, tail)| head),
+            current_node_i: self.head_and_tail.map(|(head, _tail)| head),
         }
     }
 
-    pub fn iter_mut<'a>(&'a mut self) -> MainStructureIteratorRefMut<'a, T, N> {
-        MainStructureIteratorRefMut{
-            current_node_i: self.head_and_tail.map(|(head, tail)| head),
+    pub fn iter_mut<'a>(&'a mut self) -> StackStructureIteratorRefMut<'a, T, N> {
+        StackStructureIteratorRefMut{
+            current_node_i: self.head_and_tail.map(|(head, _tail)| head),
             ms: self,
         }
     }
     
-}
-
-#[derive(Debug)]
-struct Node<T: Debug> {
-    element: Option<T>,  // will be None if this node is free //  // not needed for this to be an option but i like it. it can also be default and then we can save the cost of overwriting the bytes but idk.
-    prev: Option<usize>, // none if this is the first item
-    next: Option<usize>, // none if this is the last item
-}
-
-
-struct MainStructureIteratorRef<'a, T: Debug, const N: usize> {
-    ms: &'a MainStructure<T, N>,
-    current_node_i: Option<usize>,  // none if there are no more items
-}
-impl<'a, T: Debug, const N: usize> Iterator for MainStructureIteratorRef<'a, T, N> {
-    type Item = &'a T;
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.current_node_i {
-            None => return None,
-            Some(current_node_i) => {
-                let item = self.ms.main_memory[current_node_i].element.as_ref().unwrap();
-                self.current_node_i = self.ms.main_memory[current_node_i].next;
-                Some(item)
-            } 
+    pub const fn memory_size() -> usize {
+        core::mem::size_of::<StackStructure<T, N>>()
+    }
+    
+    // the sequence of the elements in the list must be sorted already before calling this method. otherwise the result is meaningless.
+    pub fn binary_search_by_key<'a, K: Ord, F: Fn(&'a T)->K>(&'a self, key: &K, key_of_the_element: F) -> Result<usize, usize> {
+        if self.len == 0 {
+            return Err(0);
         }
-    }
-}
-
-struct MainStructureIteratorRefMut<'a, T: Debug, const N: usize> {
-    ms: &'a mut MainStructure<T, N>,
-    current_node_i: Option<usize>,  // none if there are no more items
-}
-impl<'a, T: Debug, const N: usize> Iterator for MainStructureIteratorRefMut<'a, T, N> {
-    type Item = &'a mut T;
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.current_node_i {
-            None => return None,
-            Some(current_node_i) => {
-                let item = self.ms.main_memory[current_node_i].element.as_mut().unwrap();
-                self.current_node_i = self.ms.main_memory[current_node_i].next;
-                unsafe { Some(&mut *(item as *mut T)) }
-            } 
+        
+        let mut low: usize = 0;
+        let mut high: usize = self.len - 1;
+        
+        // for the ficiency gains so we don't have to traverse the whole list from the begining on each loop
+        // the index into the main-memory-array
+        let mut main_mem_ptr: usize = self.head_and_tail.as_ref().unwrap().0; // we already returned if self.len == 0
+        // the (virtual) index into the user-facing list.
+        let mut main_mem_ptr_index: usize = 0;
+        
+        while low <= high {
+            let mid: usize = (low + high) / 2;
+            
+            let placement_difference: isize = (mid as isize) - (main_mem_ptr_index as isize);
+            
+            let travel: &mut dyn FnMut(&Node<T>)->Option<usize> = if placement_difference >= 0 {
+                &mut |node: &Node<T>| { main_mem_ptr_index += 1; node.next }
+            } else {
+                &mut |node: &Node<T>| { main_mem_ptr_index -= 1; node.prev }
+            };
+            
+            for _ in 0..placement_difference.abs() {
+                main_mem_ptr = travel(&(self.main_memory[main_mem_ptr])).unwrap(); // we are not going out of bounds here. we use the self.len as the starting highd
+            }
+            
+            use core::cmp::Ordering;
+            match key_of_the_element(self.main_memory[main_mem_ptr].element.as_ref().unwrap()).cmp(key) { // unwrap because traveling the list is with the lements.
+                Ordering::Equal => {
+                    return Ok(mid);
+                }
+                Ordering::Less => {
+                    #[cfg(test)] println!("less {:?}", ());
+                    low = mid + 1; // while loop condition makes sure we don't use it if it goes out of bounds.
+                }
+                Ordering::Greater => {
+                    #[cfg(test)] println!("greater {:?}", ());
+                    high = match mid.checked_sub(1) {
+                        Some(good) => good,
+                        None => return Err(0),
+                    };
+                }
+            }
         }
+        return Err(low);
     }
+    
+    pub fn binary_search<'a>(&self, key: &T) -> Result<usize, usize> 
+    where T: Ord {
+        self.binary_search_by_key(&key, |e| { e })
+    }
+        
 }
 
-pub struct MainStructureIterator<T: Debug, const N: usize> {
-    ms: MainStructure<T, N>,
-}
-impl<T: Debug, const N: usize> Iterator for MainStructureIterator<T, N> {
-    type Item = T;
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.ms.len() {
-            0 => None,
-            _ => Some(self.ms.delete(0).unwrap()),
+
+
+#[cfg(test)]
+mod tests {
+    
+    
+    use super::*;
+    
+    #[test]
+    fn test_1() {
+        let mut ms = StackStructure::<u64, 5>::new();
+        ms.insert(0, 0);
+        ms.insert(1, 1);
+        
+        println!("{:?}", ms.get(1));
+        ms.insert(1, 3);
+        println!("{:?}", ms.get(1));
+        println!("{:?}", ms.get(2));
+    
+        *ms.get_mut(1).unwrap() += 1;
+        
+        
+        
+        println!("len: {:?}", ms.len());
+        println!("ms: {:?}", ms);
+        
+        for item in ms.iter() {
+            println!("item: {:?}", item);        
         }
-    }
-}
-
-impl<T: Debug, const N: usize> IntoIterator for MainStructure<T, N> {
-    type Item = T;
-    type IntoIter = MainStructureIterator<T, N>;
-    fn into_iter(self) -> Self::IntoIter {
-        MainStructureIterator{
-            ms: self
+        
+        for item in ms.iter_mut() {
+            *item += 1;
+            println!("item: {:?}", item);        
         }
-    }
-} 
-
-impl<T: Debug, const N: usize> FromIterator<T> for MainStructure<T, N> {
-    fn from_iter<GenericIterator: IntoIterator<Item=T>>(iter: GenericIterator) -> Self {
-        let mut ms = Self::new();
-        for item in iter {
-            ms.insert(ms.len(), item);
+        
+        for item in ms {
+            println!("item: {:?}", item);        
         }
-        ms
-    }
-    
-}
-
-
-#[test]
-fn test_1() {
-    let mut ms = MainStructure::<u64, 5>::new();
-    ms.insert(0, 0);
-    ms.insert(1, 1);
-    
-    println!("{:?}", ms.get(1));
-    ms.insert(1, 3);
-    println!("{:?}", ms.get(1));
-    println!("{:?}", ms.get(2));
-
-    *ms.get_mut(1).unwrap() += 1;
-    
-    
-    
-    println!("len: {:?}", ms.len());
-    println!("ms: {:?}", ms);
-    
-    for item in ms.iter() {
-        println!("item: {:?}", item);        
-    }
-    
-    for item in ms.iter_mut() {
-        *item += 1;
-        println!("item: {:?}", item);        
-    }
-    
-    for item in ms {
-        println!("item: {:?}", item);        
+        
+        let ms2 = StackStructure::<_, 2>::from_iter([
+            "hi",
+            "there",        
+        ]);
+        
+        println!("{:?}", StackStructure::<[u8; 200], 100000>::memory_size());  // on a 64-bit-platform this is the sum of the size of the lements + N*40 .
+                                                                                // 20,000,000 + 4,000,000
+                                            
+                                                                                
+                                                                                
+        let ss = StackStructure::<_, 5>::from_iter([
+            "c",
+        ]);
+                                                                                
+                                                                                
+        let search_output = ss.binary_search(&"b");
+        println!("search_output: {:?}", search_output);
     }
 
 }
