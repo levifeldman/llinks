@@ -6,10 +6,16 @@ use core::mem::MaybeUninit;
 mod iterators;
 pub use iterators::*;
 
+mod variable_size_immutable_array;
+pub use variable_size_immutable_array::*;
 
+mod map;
+pub use map::*;
 
 #[cfg(test)] extern crate std;
 #[cfg(test)] use std::*;
+#[cfg(test)] mod tests;
+
 
 
 
@@ -119,6 +125,10 @@ impl<T: Debug, const N: usize> StackStructure<T, N> {
         Ok(())
     }
     
+    pub fn push(&mut self, element: T) -> Result<(), ()> { // err if list is full or if index is out of bounds
+        self.insert(self.len, element)
+    }
+    
     pub fn delete(&mut self, deletion_index: usize) -> Result<T, ()> { // error if index out of bounds 
         match self.head_and_tail {
             None => return Err(()), // nothing to delete
@@ -204,26 +214,28 @@ impl<T: Debug, const N: usize> StackStructure<T, N> {
         }
     }
     
+    pub fn set(&mut self, set_index: usize, value: T) -> Result<T, ()> { // error if index out of bounds // returns old value
+        match self.head_and_tail {
+            None => return Err(()), // nothing to get
+            Some((head, _tail)) => { // i can optimize this by starting from the tail if get_index > (len/2)
+                let mut node_to_get_i = head;
+                for _ in 0..set_index {
+                    node_to_get_i = match self.main_memory[node_to_get_i].next {
+                        None => return Err(()), // index out of bounds
+                        Some(i) => i,
+                    };
+                }
+                Ok(self.main_memory[node_to_get_i].element.replace(value).unwrap()) // unwrap is safe here because each element in the list is with a Some value
+            }
+        }
+    }
+    
     pub fn len(&self) -> usize {
         self.len
     }
     
     pub fn capacity(&self) -> usize {
         N
-    }
-    
-    pub fn iter<'a>(&'a self) -> StackStructureIteratorRef<'a, T, N> {
-        StackStructureIteratorRef{
-            ms: self,
-            current_node_i: self.head_and_tail.map(|(head, _tail)| head),
-        }
-    }
-
-    pub fn iter_mut<'a>(&'a mut self) -> StackStructureIteratorRefMut<'a, T, N> {
-        StackStructureIteratorRefMut{
-            current_node_i: self.head_and_tail.map(|(head, _tail)| head),
-            ms: self,
-        }
     }
     
     pub const fn memory_size() -> usize {
@@ -286,64 +298,4 @@ impl<T: Debug, const N: usize> StackStructure<T, N> {
         self.binary_search_by_key(&key, |e| { e })
     }
         
-}
-
-
-
-#[cfg(test)]
-mod tests {
-    
-    
-    use super::*;
-    
-    #[test]
-    fn test_1() {
-        let mut ms = StackStructure::<u64, 5>::new();
-        ms.insert(0, 0);
-        ms.insert(1, 1);
-        
-        println!("{:?}", ms.get(1));
-        ms.insert(1, 3);
-        println!("{:?}", ms.get(1));
-        println!("{:?}", ms.get(2));
-    
-        *ms.get_mut(1).unwrap() += 1;
-        
-        
-        
-        println!("len: {:?}", ms.len());
-        println!("ms: {:?}", ms);
-        
-        for item in ms.iter() {
-            println!("item: {:?}", item);        
-        }
-        
-        for item in ms.iter_mut() {
-            *item += 1;
-            println!("item: {:?}", item);        
-        }
-        
-        for item in ms {
-            println!("item: {:?}", item);        
-        }
-        
-        let ms2 = StackStructure::<_, 2>::from_iter([
-            "hi",
-            "there",        
-        ]);
-        
-        println!("{:?}", StackStructure::<[u8; 200], 100000>::memory_size());  // on a 64-bit-platform this is the sum of the size of the lements + N*40 .
-                                                                                // 20,000,000 + 4,000,000
-                                            
-                                                                                
-                                                                                
-        let ss = StackStructure::<_, 5>::from_iter([
-            "c",
-        ]);
-                                                                                
-                                                                                
-        let search_output = ss.binary_search(&"b");
-        println!("search_output: {:?}", search_output);
-    }
-
 }
