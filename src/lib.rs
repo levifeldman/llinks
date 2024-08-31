@@ -6,8 +6,8 @@ use core::mem::MaybeUninit;
 mod iterators;
 pub use iterators::*;
 
-mod variable_size_immutable_array;
-pub use variable_size_immutable_array::*;
+mod simple;
+pub use simple::*;
 
 mod map;
 pub use map::*;
@@ -28,7 +28,7 @@ struct Node<T: Debug> {
 
 #[derive(Debug)]
 pub struct StackStructure<T: Debug, const N: usize> {
-    main_memory: [Node<T>; N],
+    pub(crate) main_memory: [Node<T>; N],
     head_and_tail: Option<(usize, usize)>,      // None if list is empty// index into the main_memory
     free_list: Option<usize>,                   // points to the first free node. None if list is full.
     len: usize,
@@ -58,17 +58,46 @@ impl<T: Debug, const N: usize> StackStructure<T, N> {
         }
     }
     
-    pub fn insert(&mut self, insertion_index: usize, element: T) -> Result<(), ()> { // err if list is full or if index is out of bounds
-        match self.free_list {  // .clone()
+    fn __get_new_node_from_free_list(&mut self) -> Option<usize/*internal-array-index*/> { // None if full
+        match self.free_list {
             None => {
-                return Err(()); // full
+                return None; // full
             }
             Some(new_node_i) => {
-                
                 self.free_list = self.main_memory[new_node_i].next;
                 if let Some(i) = self.main_memory[new_node_i].next {
                     self.main_memory[i].prev = None; // now this one becomes the first free node // this might not be needed but i like it
                 }
+                Some(new_node_i)
+            }
+        }
+    }
+    
+    fn __insert_node_after_node(&mut self, new_node_i: usize, current_node_i: usize) {
+        self.main_memory[new_node_i].prev = Some(current_node_i);
+        match self.main_memory[current_node_i].next {
+            None => {
+                // tail
+                self.main_memory[new_node_i].next = None;
+                self.head_and_tail.as_mut().unwrap().1 = new_node_i;
+            }
+            Some(next_node_i) => {
+                // in the middle
+                self.main_memory[new_node_i].next = Some(next_node_i);
+                self.main_memory[next_node_i].prev = Some(new_node_i);
+            }
+        }
+        self.main_memory[current_node_i].next = Some(new_node_i);
+    }
+
+    
+    // optimize to start from tail if len - insertion_index < len / 2
+    pub fn insert(&mut self, insertion_index: usize, element: T) -> Result<(), ()> { // err if list is full or if index is out of bounds
+        match self.__get_new_node_from_free_list() {
+            None => {
+                return Err(()); // full
+            }
+            Some(new_node_i) => {
                 
                 self.main_memory[new_node_i].element = Some(element);
                 
@@ -100,22 +129,7 @@ impl<T: Debug, const N: usize> StackStructure<T, N> {
                                 }
                             }
                             
-                            self.main_memory[new_node_i].prev = Some(current_node_i);
-                            
-                            match self.main_memory[current_node_i].next {
-                                None => {
-                                    // tail
-                                    self.main_memory[new_node_i].next = None;
-                                    self.main_memory[current_node_i].next = Some(new_node_i);
-                                    self.head_and_tail.as_mut().unwrap().1 = new_node_i;
-                                }
-                                Some(next_node_i) => {
-                                    // in the middle
-                                    self.main_memory[new_node_i].next = Some(next_node_i);
-                                    self.main_memory[current_node_i].next = Some(new_node_i);
-                                    self.main_memory[next_node_i].prev = Some(new_node_i);
-                                }
-                            }
+                            self.__insert_node_after_node(new_node_i, current_node_i);
                         }
                     }
                 }
@@ -126,9 +140,48 @@ impl<T: Debug, const N: usize> StackStructure<T, N> {
     }
     
     pub fn push(&mut self, element: T) -> Result<(), ()> { // err if list is full or if index is out of bounds
-        self.insert(self.len, element)
+        self.insert(self.len, element) // later i can optimize the insert method to start from the tail if the index is closer to len than it is to 0.
     }
     
+    fn __delete_node(&mut self, node_to_delete_i: usize) -> T {
+        match self.main_memory[node_to_delete_i].prev {
+            Some(prev_i) => {
+                self.main_memory[prev_i].next = self.main_memory[node_to_delete_i].next;
+            }
+            None => {
+                // node-to-delete is the head so we need to set a new head 
+                match self.main_memory[node_to_delete_i].next {
+                    Some(next_i) => {
+                        self.head_and_tail.as_mut().unwrap().0 = next_i;
+                    }
+                    None => {
+                        self.head_and_tail = None;
+                    }
+                }
+            }
+        }
+        match self.main_memory[node_to_delete_i].next {
+            Some(next_i) => {
+                self.main_memory[next_i].prev = self.main_memory[node_to_delete_i].prev;
+            }
+            None => { 
+                match self.main_memory[node_to_delete_i].prev {
+                    Some(prev_i) => {
+                        self.head_and_tail.as_mut().unwrap().1 = prev_i;
+                    }
+                    None => {
+                        self.head_and_tail = None;
+                    }
+                }
+            }
+        }
+        self.main_memory[node_to_delete_i].next = self.free_list;
+        self.free_list = Some(node_to_delete_i);
+        self.len -= 1;
+        self.main_memory[node_to_delete_i].element.take().unwrap()
+    }
+    
+    // optimize to start from tail if len - insertion_index < len / 2
     pub fn delete(&mut self, deletion_index: usize) -> Result<T, ()> { // error if index out of bounds 
         match self.head_and_tail {
             None => return Err(()), // nothing to delete
@@ -140,48 +193,12 @@ impl<T: Debug, const N: usize> StackStructure<T, N> {
                         Some(i) => i,
                     };
                 }
-                match self.main_memory[node_to_delete_i].prev {
-                    Some(prev_i) => {
-                        self.main_memory[prev_i].next = self.main_memory[node_to_delete_i].next;
-                    }
-                    None => {
-                        // node-to-delete is the head so we need to set a new head 
-                        match self.main_memory[node_to_delete_i].next {
-                            Some(next_i) => {
-                                self.head_and_tail.as_mut().unwrap().0 = next_i;
-                            }
-                            None => {
-                                self.head_and_tail = None;
-                            }
-                        }
-                    }
-                }
-    
-                match self.main_memory[node_to_delete_i].next {
-                    Some(next_i) => {
-                        self.main_memory[next_i].prev = self.main_memory[node_to_delete_i].prev;
-                    }
-                    None => { 
-                        match self.main_memory[node_to_delete_i].prev {
-                            Some(prev_i) => {
-                                self.head_and_tail.as_mut().unwrap().1 = prev_i;
-                            }
-                            None => {
-                                self.head_and_tail = None;
-                            }
-                        }
-                    }
-                }
-    
-                self.main_memory[node_to_delete_i].next = self.free_list;
-                self.free_list = Some(node_to_delete_i);
-                
-                self.len -= 1;
-                Ok(core::mem::take(&mut self.main_memory[node_to_delete_i].element).unwrap())
+                Ok(self.__delete_node(node_to_delete_i))
             }
         }
     }
     
+    // optimize to start from tail if len - insertion_index < len / 2
     pub fn get(&self, get_index: usize) -> Result<&T, ()> { // error if index out of bounds
         match self.head_and_tail {
             None => return Err(()), // nothing to get
@@ -198,6 +215,7 @@ impl<T: Debug, const N: usize> StackStructure<T, N> {
         }
     }
     
+    // optimize to start from tail if len - insertion_index < len / 2
     pub fn get_mut(&mut self, get_index: usize) -> Result<&mut T, ()> { // err if index out of bounds
         match self.head_and_tail {
             None => return Err(()), // nothing to get
@@ -214,6 +232,7 @@ impl<T: Debug, const N: usize> StackStructure<T, N> {
         }
     }
     
+    // optimize to start from tail if len - insertion_index < len / 2
     pub fn set(&mut self, set_index: usize, value: T) -> Result<T, ()> { // error if index out of bounds // returns old value
         match self.head_and_tail {
             None => return Err(()), // nothing to get
@@ -233,19 +252,12 @@ impl<T: Debug, const N: usize> StackStructure<T, N> {
     pub fn len(&self) -> usize {
         self.len
     }
-    
-    pub fn capacity(&self) -> usize {
-        N
-    }
-    
-    pub const fn memory_size() -> usize {
-        core::mem::size_of::<StackStructure<T, N>>()
-    }
-    
-    // the sequence of the elements in the list must be sorted already before calling this method. otherwise the result is meaningless.
-    pub fn binary_search_by_key<'a, K: Ord, F: Fn(&'a T)->K>(&'a self, key: &K, key_of_the_element: F) -> Result<usize, usize> {
+        
+    pub(crate) fn __binary_search_by_key<'a, K: Ord, F: Fn(&'a T)->K>(&'a self, key: K, key_of_the_element: F) 
+    -> Result<(usize/*virtual-index*/, usize/*internal-array-index*/), (usize/*virtual-index*/, Option<usize>/*None means insert at virtual-index-~0, Some means the node that comes before a potential sorted insert*/)> // ok is the item is found at this location 
+    {
         if self.len == 0 {
-            return Err(0);
+            return Err((0, None));
         }
         
         let mut low: usize = 0;
@@ -272,30 +284,47 @@ impl<T: Debug, const N: usize> StackStructure<T, N> {
                 main_mem_ptr = travel(&(self.main_memory[main_mem_ptr])).unwrap(); // we are not going out of bounds here. we use the self.len as the starting highd
             }
             
+            //#[cfg(test)] println!("main_mem_ptr before compare {:?}", main_mem_ptr);
+           
+            
             use core::cmp::Ordering;
-            match key_of_the_element(self.main_memory[main_mem_ptr].element.as_ref().unwrap()).cmp(key) { // unwrap because traveling the list is with the lements.
+            match key_of_the_element(self.main_memory[main_mem_ptr].element.as_ref().unwrap()).cmp(&key) { // unwrap because traveling the list is with the lements.
                 Ordering::Equal => {
-                    return Ok(mid);
+                    //#[cfg(test)] println!("equal {:?}", ());
+                    return Ok((mid, main_mem_ptr));
                 }
                 Ordering::Less => {
-                    #[cfg(test)] println!("less {:?}", ());
+                    //#[cfg(test)] println!("less {:?}", ());
                     low = mid + 1; // while loop condition makes sure we don't use it if it goes out of bounds.
                 }
                 Ordering::Greater => {
-                    #[cfg(test)] println!("greater {:?}", ());
+                    //#[cfg(test)] println!("greater {:?}", ());
                     high = match mid.checked_sub(1) {
                         Some(good) => good,
-                        None => return Err(0),
+                        None => return Err((0, None)),
                     };
+                    if high < low {
+                        return Err((low, Some(self.main_memory[main_mem_ptr].prev.unwrap())));
+                    }
                 }
             }
         }
-        return Err(low);
+        return Err((low, Some(main_mem_ptr)));
     }
     
-    pub fn binary_search<'a>(&self, key: &T) -> Result<usize, usize> 
+    // the sequence of the elements in the list must be sorted already before calling this method. otherwise the result is meaningless.
+    pub fn binary_search_by_key<'a, K: Ord, F: Fn(&'a T)->K>(&'a self, key: K, key_of_the_element: F) -> Result<usize, usize>   
+    {  
+        self.__binary_search_by_key(key, key_of_the_element)
+            .map(    |(virtual_i, _)| virtual_i)
+            .map_err(|(virtual_i, _)| virtual_i)
+    }
+        
+    pub fn binary_search(&self, key: &T) -> Result<usize, usize> 
     where T: Ord {
-        self.binary_search_by_key(&key, |e| { e })
+        //#[inline_always]
+        fn same<T>(t: &T) -> &T { t }
+        self.binary_search_by_key(key, same)
     }
         
 }

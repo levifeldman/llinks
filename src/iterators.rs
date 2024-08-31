@@ -46,7 +46,10 @@ impl<T: Debug, const N: usize> FromIterator<T> for StackStructure<T, N> {
     fn from_iter<Iter: IntoIterator<Item=T>>(iter: Iter) -> Self {
         let mut ms = Self::new();
         for item in iter {
-            ms.push(item).expect("The size of the StackStructure must be set big enough for this iterator"); // will panic if size is not big enough, or maybe silent error and break?
+            match ms.push(item) {
+                Ok(()) => {},
+                Err(()) => break,
+            }
         }
         ms
     }    
@@ -179,19 +182,18 @@ impl<'a, T: Debug, const N: usize> FusedIterator for StackStructureIteratorRefMu
 impl<T: Debug, const N: usize> Extend<T> for StackStructure<T, N> {
     fn extend<Iter: IntoIterator<Item=T>>(&mut self, iter: Iter) {
         for item in iter {
-            self.push(item);
+            self.push(item).unwrap(); // will panic if not enough room!
         }
     }
 }
 
 
 
-pub struct RChunks<'a, T: Debug, const N: usize, const C: usize> {
+pub struct StackStructureRChunks<'a, T: Debug, const N: usize, const C: usize> {
     iterator: StackStructureIteratorRef<'a, T, N>,
-    default_value: T,
 }
-impl<'a, T: Debug, const N: usize, const C: usize> Iterator for RChunks<'a, T, N, C> {
-    type Item = VariableSizeImmutableArray<&'a T, C>;
+impl<'a, T: Debug, const N: usize, const C: usize> Iterator for StackStructureRChunks<'a, T, N, C> {
+    type Item = StackSimple<&'a T, C>;
     fn next(&mut self) -> Option<Self::Item> {
         if self.iterator.len() == 0 {
             return None;
@@ -203,28 +205,26 @@ impl<'a, T: Debug, const N: usize, const C: usize> Iterator for RChunks<'a, T, N
                 self.iterator.next_back().unwrap() // unwrap cause we checked that the chunk_len is never greater than the iterator len
             );
         }
-        for i in chunk_len..C {
-            chunk_data[i].write(&self.default_value);
+        Some(unsafe { StackSimple::from_maybe_uninit_data_and_len(chunk_data, chunk_len) }) // unsafe ok bc we just wrote to the first len items in the chunk_data
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let mut number_of_chunks_left = self.iterator.len() / C;
+        if self.iterator.len() % C != 0 {
+            number_of_chunks_left += 1;
         }
-        //unsafe { core::mem::transmute::<_, [Node<T>; N]>(m) } // https://github.com/rust-lang/rust/issues/62875
-        let done = unsafe { core::ptr::read((&chunk_data as *const [MaybeUninit<&T>; C]).cast::<[&'a T; C]>()) };
-        core::mem::forget(chunk_data);
-        
-        Some(VariableSizeImmutableArray::new(done, chunk_len).unwrap()) // unwrap ok bc we set chunk_len to the min(C, iterator.len()). 
-        
+        (number_of_chunks_left, Some(number_of_chunks_left))
     }
 }
+impl<'a, T: Debug, const N: usize, const C: usize> ExactSizeIterator for StackStructureRChunks<'a, T, N, C> {}
+impl<'a, T: Debug, const N: usize, const C: usize> FusedIterator for StackStructureRChunks<'a, T, N, C> {}
 
-impl<'a, T: Debug + Default, const N: usize> StackStructure<T, N> {
-    pub fn rchunks<const C: usize>(&'a self) -> RChunks<'a, T, N, C> {
-        RChunks::<'a, T, N, C>{
+
+impl<'a, T: Debug, const N: usize> StackStructure<T, N> {
+    // this method creates a reference for each element in the chunk at the same time. don't create large chunks.
+    // the chunk size is reserved at compile time on the stack though. and the size is the size of a reference times the number of references in the chunk.
+    pub fn rchunks<const C: usize>(&'a self) -> StackStructureRChunks<'a, T, N, C> {
+        StackStructureRChunks::<'a, T, N, C>{
             iterator: self.iter(),
-            default_value: T::default(),
         }
     }
-    /*
-    pub fn rchunks_mut<const C: usize>(&self) -> RChunksMut<'a, T, N, C> {
-        
-    }
-    */
 }

@@ -37,7 +37,7 @@ fn test_1() {
         "there",        
     ]);
     
-    println!("{:?}", StackStructure::<[u8; 200], 100000>::memory_size());  // on a 64-bit-platform this is the sum of the size of the lements + N*40 .
+    println!("{:?}", core::mem::size_of::<StackStructure::<[u8; 200], 100000>>());  // on a 64-bit-platform this is the sum of the size of the lements + N*40 .
                                                                             // 20,000,000 + 4,000,000
                                         
                                                                             
@@ -57,6 +57,7 @@ fn test_iter() {
 
     let numbers = StackStructure::<_, 6>::from_iter([1, 2, 3, 4, 5, 6]);
         
+    println!("numbers: {:?}", numbers);
     let mut iter = numbers.iter();
     assert_eq!(Some(&1), iter.next());
     assert_eq!(Some(&2), iter.next());
@@ -81,8 +82,21 @@ fn test_iter() {
 
 #[test]
 fn test_chunk() {
-    let x = VariableSizeImmutableArray::new([1,2,3,4,5], 4).unwrap();
+    let x = StackSimple::from_array([1,2,3,4,5]);
     println!("chunk RangeFull: {:?}", &x[..]);
+    
+    let mut iter = x.into_iter();
+    for _ in 0..3 {
+        let v = iter.next_back().unwrap();
+        println!("{:?}", v);
+        if v == 3 {
+            break;
+        }
+    }
+    for i in iter {
+        println!("{:?}", i);
+    }
+    
 }
 
 #[test]
@@ -95,4 +109,87 @@ fn test_rchunks() {
             println!("{:?}", item);
         }
     }
+}
+
+
+#[test]
+fn test_map() {
+    let mut map = StackMap::<_, _, 40>::from_iter([
+        (0, "hi"),
+        (1, "tell"),
+    ]);
+    
+    
+    map.insert(4, "three").unwrap();
+    map.insert(3, "three").unwrap();
+    map.insert(5, "three").unwrap();
+    map.insert(2, "two").unwrap();
+    for i in map.iter() {
+        println!("i: {:?}", i);
+    }
+    //println!("map: {:?}", &map);
+    
+    for i in 0..5 {
+        map.insert(i, "loop").unwrap();
+    }
+    for i in map.iter() {
+        println!("i: {:?}", i);
+    }
+    
+    for i in map.values_mut() {
+        *i = "change";
+    }
+    
+    for i in map.iter() {
+        println!("i: {:?}", i);
+    }
+    
+    println!("map len: {:?}", map.len());
+
+    
+    map.remove(&600);
+    
+    for i in map.iter() {
+        println!("i: {:?}", i);
+    }
+    println!("map len: {:?}", map.len());
+
+}
+
+
+#[test]
+fn test_simple() {
+    let mut x = StackSimple::from_array([1,2,5,6,8]);
+    
+    for chunk in x.rchunks(3) {
+        println!("{:?}", chunk);
+    }
+    
+    x[3] += 1;
+    
+    let mut iter = x.rchunks(3); 
+    
+    for _ in 0..iter.len() {
+        println!("chunks left: {:?}", iter.len());
+        println!("{:?}", iter.next().unwrap());
+    }
+    
+
+    
+}
+
+#[test]
+fn test_map_rchunks() {
+    let x = StackMap::<u64, u64, 10>::from_iter([
+        (0,0),
+        (1,1),
+        (2,2),
+        (3,3),
+        (4,4)
+    ]);
+    
+    for c in x.rchunks::<2>() {
+        println!("{:?}", &c[..]);
+    }
+    
 }
