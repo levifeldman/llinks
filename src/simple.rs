@@ -22,7 +22,7 @@ impl<T, const C: usize> StackSimple<T, C> {
         }
     }
     // if you want the stack-simple to have bigger capacity then the length of the given array, then use StackSimple::<T, C/*set capacity here*/>::from_iter(array) but make sure capacity is greater than the length of the array.
-    pub fn from_array(a: [T; C]) -> Self {
+    pub fn from_array_of_same_capacity(a: [T; C]) -> Self {
         Self {
             len: a.len(),
             data: array_as_maybeuninit(a),            
@@ -30,7 +30,7 @@ impl<T, const C: usize> StackSimple<T, C> {
     }
     /// caller must make sure that the first len number of items is initialized with maybeuninit.write and caller must make sure that the remaining elements are not initialized yet.
     /// len must be <= data.len()
-    pub(crate) unsafe fn from_maybe_uninit_data_and_len(data: [MaybeUninit<T>; C], len: usize) -> Self {
+    pub unsafe fn from_maybeuninit_data_and_len(data: [MaybeUninit<T>; C], len: usize) -> Self {
         Self {
             data,
             len
@@ -88,10 +88,7 @@ impl<T, const C: usize> FromIterator<T> for StackSimple<T, C> {
     fn from_iter<Iter: IntoIterator<Item=T>>(iter: Iter) -> Self {
         let mut simple = Self::new();
         for item in iter {
-            match simple.push(item) {
-                Ok(()) => {},
-                Err(()) => break,
-            }
+            simple.push(item).unwrap(); // will panic if not enough capacity!
         }
         simple
     }    

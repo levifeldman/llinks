@@ -139,7 +139,7 @@ impl<T: Debug, const N: usize> StackStructure<T, N> {
         Ok(())
     }
     
-    pub fn push(&mut self, element: T) -> Result<(), ()> { // err if list is full or if index is out of bounds
+    pub fn push(&mut self, element: T) -> Result<(), ()> { // err if list is full
         self.insert(self.len, element) // later i can optimize the insert method to start from the tail if the index is closer to len than it is to 0.
     }
     
@@ -199,35 +199,35 @@ impl<T: Debug, const N: usize> StackStructure<T, N> {
     }
     
     // optimize to start from tail if len - insertion_index < len / 2
-    pub fn get(&self, get_index: usize) -> Result<&T, ()> { // error if index out of bounds
+    pub fn get(&self, get_index: usize) -> Option<&T> { // none if index out of bounds
         match self.head_and_tail {
-            None => return Err(()), // nothing to get
+            None => return None, // nothing to get
             Some((head, _tail)) => { // i can optimize this by starting from the tail if get_index > (len/2)
                 let mut node_to_get_i = head;
                 for _ in 0..get_index {
                     node_to_get_i = match self.main_memory[node_to_get_i].next {
-                        None => return Err(()), // index out of bounds
+                        None => return None, // index out of bounds
                         Some(i) => i,
                     };
                 }
-                Ok(self.main_memory[node_to_get_i].element.as_ref().unwrap()) // unwrap is safe here because each element in the list is with a Some value
+                Some(self.main_memory[node_to_get_i].element.as_ref().unwrap()) // unwrap is safe here because each element in the list is with a Some value
             }
         }
     }
     
     // optimize to start from tail if len - insertion_index < len / 2
-    pub fn get_mut(&mut self, get_index: usize) -> Result<&mut T, ()> { // err if index out of bounds
+    pub fn get_mut(&mut self, get_index: usize) -> Option<&mut T> { // none if index out of bounds
         match self.head_and_tail {
-            None => return Err(()), // nothing to get
+            None => return None, // nothing to get
             Some((head, _tail)) => { // i can optimize this by starting from the tail if get_index > (len/2)
                 let mut node_to_get_i = head;
                 for _ in 0..get_index {
                     node_to_get_i = match self.main_memory[node_to_get_i].next {
-                        None => return Err(()), // index out of bounds
+                        None => return None, // index out of bounds
                         Some(i) => i,
                     };
                 }
-                Ok(self.main_memory[node_to_get_i].element.as_mut().unwrap()) // unwrap is safe here because each element in the list is with a Some value
+                Some(self.main_memory[node_to_get_i].element.as_mut().unwrap()) // unwrap is safe here because each element in the list is with a Some value
             }
         }
     }

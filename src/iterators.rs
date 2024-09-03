@@ -46,10 +46,7 @@ impl<T: Debug, const N: usize> FromIterator<T> for StackStructure<T, N> {
     fn from_iter<Iter: IntoIterator<Item=T>>(iter: Iter) -> Self {
         let mut ms = Self::new();
         for item in iter {
-            match ms.push(item) {
-                Ok(()) => {},
-                Err(()) => break,
-            }
+            ms.push(item).unwrap(); // will panic if not enough room!
         }
         ms
     }    
@@ -205,7 +202,7 @@ impl<'a, T: Debug, const N: usize, const C: usize> Iterator for StackStructureRC
                 self.iterator.next_back().unwrap() // unwrap cause we checked that the chunk_len is never greater than the iterator len
             );
         }
-        Some(unsafe { StackSimple::from_maybe_uninit_data_and_len(chunk_data, chunk_len) }) // unsafe ok bc we just wrote to the first len items in the chunk_data
+        Some(unsafe { StackSimple::from_maybeuninit_data_and_len(chunk_data, chunk_len) }) // unsafe ok bc we just wrote to the first len items in the chunk_data
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
         let mut number_of_chunks_left = self.iterator.len() / C;

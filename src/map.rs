@@ -110,10 +110,7 @@ impl<K: Ord + Debug, V: Debug, const N: usize> FromIterator<(K, V)> for StackMap
         // must sort them.
         let mut map = Self::new();
         for t in iter {
-            match map.insert(t.0, t.1) {
-                Ok(_) => {},
-                Err(()) => break,
-            }
+            map.insert(t.0, t.1).unwrap(); // will panic if not enough capacity!
         }
         map
     }    

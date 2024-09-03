@@ -82,7 +82,7 @@ fn test_iter() {
 
 #[test]
 fn test_chunk() {
-    let x = StackSimple::from_array([1,2,3,4,5]);
+    let x = StackSimple::from_array_of_same_capacity([1,2,3,4,5]);
     println!("chunk RangeFull: {:?}", &x[..]);
     
     let mut iter = x.into_iter();
@@ -159,7 +159,7 @@ fn test_map() {
 
 #[test]
 fn test_simple() {
-    let mut x = StackSimple::from_array([1,2,5,6,8]);
+    let mut x = StackSimple::from_array_of_same_capacity([1,2,5,6,8]);
     
     for chunk in x.rchunks(3) {
         println!("{:?}", chunk);
